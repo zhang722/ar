@@ -24,8 +24,6 @@ where
     while iteration < max_iter {
         let fx = problem.residual(&x);
         let j = problem.jacobian(&x);
-        // println!("{}", fx);
-        // println!("{}", j);
 
         let jtj = j.transpose() * &j;
         let mut jtj_with_lambda = jtj.clone();
@@ -42,8 +40,6 @@ where
                 let fx_new = problem.residual(&new_x);
                 let fx_norm = fx.norm();
                 let fx_new_norm = fx_new.norm();
-                println!("r: {}, r_new: {}", fx_norm, fx_new_norm);
-                println!("lambda: {}", lambda_current);
 
                 if (fx_norm - fx_new_norm).abs() < tol {
                     break;

@@ -274,7 +274,7 @@ impl lm::LMProblem for Calibration<'_> {
                 let transform_jacobian_wrt_transform = exp_map_jacobian(&transformed_point);
 
                 let lie_algebra = log_map(transform);
-                let jacobian_xi_k = -na::Vector6::<f64>::new(
+                let jacobian_xi_k = na::Vector6::<f64>::new(
                     lie_algebra.x, lie_algebra.y, lie_algebra.z, 0.0, 0.0, 0.0
                 );
 
@@ -306,7 +306,7 @@ pub fn optimize_with_lm(
 
     let init_param = na::DVector::<f64>::identity(img_points.len());
 
-    let max_iter = 100;
+    let max_iter = 50;
     let tol = 1e-8;
     let lambda = 1e-3;
     let gamma = 10.0;

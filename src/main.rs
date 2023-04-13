@@ -2,9 +2,9 @@ use std::{error::Error, io::Read};
 
 use opencv::{
     prelude::*,
-    imgcodecs,
-    imgproc,
-    core::{self}, 
+    videoio::{self, VideoCaptureTrait},
+    highgui,
+    core,
 };
 
 use nalgebra as na;
@@ -24,29 +24,8 @@ struct Model {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let image_path = "imgs/100000.png"; // Replace with your image path
-    // Load the image in color mode
-    let mut image = imgcodecs::imread(image_path, imgcodecs::IMREAD_COLOR)?;
-    let mut gray = Mat::default();
-    imgproc::cvt_color(&image, &mut gray, imgproc::COLOR_BGR2GRAY, 0)?;
-
-    // Check if the image is empty
-    if gray.empty() {
-        println!("Failed to open the image.");
-        return Err(From::from("gray image is empty"));
-    }
-
-    let points = detect::detect_corners(&gray)?; 
-    let world_points = pose::generate_world_points(0.02, (11, 8))?;
-
-    for (idx, p) in points.iter().enumerate() {
-        imgproc::circle(&mut image, core::Point2i::new(p.x as i32, p.y as i32), 5, core::Scalar::new(255.0, 0.0, 0.0, 255.0), 1, 
-            imgproc::LINE_8, 0)?;
-    }
-
-    // 打开文件
+    // intrinsic and distortion
     let mut file = std::fs::File::open("config.json").expect("Unable to open file");
-
     // 读取文件内容
     let mut content = String::new();
     file.read_to_string(&mut content).expect("Unable to read the file");
@@ -56,25 +35,45 @@ fn main() -> Result<(), Box<dyn Error>> {
     let dist = model.distortion;
 
 
-    let h = 0.6 * pose::compute_h(&points, &world_points)?;
-    let mut tf = pose::compute_tf(&h, &k)?;
-    let mut tfs = vec![tf];
-    let img_point_set = vec![points];
-
-    optimize_with_lm::optimize_with_lm(&k, &dist, &mut tfs, &img_point_set, &world_points)?;
-    let tf = tfs[0];
+    // video
+    let video_path = "./imgs/test.mp4";
+    let mut capture = videoio::VideoCapture::from_file(video_path, videoio::CAP_ANY)?;
     
-    let reproj_p = world_points.iter().map(|p| {
-        pose::project(&k, &dist, &(tf * na::Point3::<f64>::new(p.x, p.y, 0.0)))
-    }).collect::<Vec<_>>();
-    for p in reproj_p {
-        println!("{}", p);
-        imgproc::circle(&mut image, core::Point2i::new(p.x as i32, p.y as i32), 5, core::Scalar::new(0.0, 255.0, 0.0, 255.0), 1, 
-            imgproc::LINE_8, 0)?;
+    if !capture.is_opened()? {
+        panic!("Unable to open video file!");
     }
 
+    let width = capture.get(videoio::CAP_PROP_FRAME_WIDTH)?;
+    let height = capture.get(videoio::CAP_PROP_FRAME_HEIGHT)?;
+    let fps = capture.get(videoio::CAP_PROP_FPS)?;
 
-    gui::imshow("title", &image)?;
+    let fourcc = videoio::VideoWriter::fourcc('M', 'J', 'P', 'G')?;
+    let output_filename = "output.avi";
+    let mut video_writer = videoio::VideoWriter::new(output_filename, fourcc, fps, core::Size2i::new(width as i32, height as i32), true)?;
+
+    highgui::named_window("Video", highgui::WINDOW_NORMAL)?;
+    let mut frame = Mat::default();
+    loop {
+        capture.read(&mut frame)?;
+        
+        if frame.size()?.width <= 0 {
+            break;
+        }
+
+        // process
+        if let Err(e) = gui::process(&mut frame, &k, &dist) {
+            println!("Error: {}", e);
+            continue;
+        }
+
+        video_writer.write(&frame)?;
+        // show
+        highgui::imshow("Video", &frame)?;
+        if highgui::wait_key(30)? >= 0 {
+            break;
+        }
+    }
+
 
     Ok(())
 }
