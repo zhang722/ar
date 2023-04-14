@@ -19,9 +19,9 @@ use nalgebra as na;
 /// '''
 /// gray: &opencv::core::Mat
 /// return: opencv::Result<Vec<core::Point2f>>
-pub fn detect_corners(gray: &Mat) -> opencv::Result<Vec<na::Point2<f64>>> {
+pub fn detect_corners(gray: &Mat, pattern: (i32, i32)) -> opencv::Result<Vec<na::Point2<f64>>> {
     use opencv::core::Size;
-    let patternsize: Size = Size::new(7, 5);
+    let patternsize: Size = Size::new(pattern.0, pattern.1);
     let mut corners = Mat::default();
     let patternfound = calib3d::find_chessboard_corners(&gray, patternsize, &mut corners, 
         calib3d::CALIB_CB_ADAPTIVE_THRESH + calib3d::CALIB_CB_NORMALIZE_IMAGE

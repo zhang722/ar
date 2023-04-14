@@ -2,62 +2,18 @@ use std::error::Error;
 
 use opencv::{
     prelude::*,
-    videoio::{self, VideoCaptureTrait},
-    highgui,
     imgproc,
-    core::{self, Point2f},
+    core,
 };
 
 use nalgebra as na;
 
 use crate::{detect, pose, optimize_with_lm};
 
-pub fn resize_width(src: &Mat, width: i32) -> Result<Mat, Box<dyn Error>> {
-     // Get the original image dimensions
-    let original_width = src.cols();
-    let original_height = src.rows();
+pub fn process(frame: &mut Mat, model: &super::Model) -> Result<(), Box<dyn Error>> {
+    let super::Model {intrinsic: k, distortion: dist, pattern} = model;
+    let pattern = (pattern.x, pattern.y);
 
-    // Calculate the new dimensions while maintaining the aspect ratio
-    let aspect_ratio = original_height as f64 / original_width as f64;
-    let new_width = width;
-    let new_height = (new_width as f64 * aspect_ratio) as i32;
-
-    // Create a new Mat object to store the resized image
-    let mut resized_image = Mat::default();
-    
-    // Resize the image
-    imgproc::resize(
-        &src,
-        &mut resized_image,
-        opencv::core::Size::new(new_width, new_height),
-        0.0,
-        0.0,
-        imgproc::INTER_LINEAR,
-    )?;
-
-    Ok(resized_image)
-}
-
-pub fn imshow(title: &str, image: &Mat) -> Result<(), Box<dyn Error>> {
-    // Define the desired width or height for the displayed image
-    let display_width = 800; // You can also use a desired height instead
-
-    let resized_image = resize_width(image, display_width)?;
-
-    // Create a window to display the image
-    highgui::named_window("Image Display", highgui::WINDOW_NORMAL)?;
-
-    // Show the resized image in the created window
-    highgui::imshow("Image Display", &resized_image)?;
-
-    // Wait for a key press and close the window
-    highgui::wait_key(0)?;
-
-    Ok(())
-}
-
-
-pub fn process(frame: &mut Mat, k: &na::Matrix3<f64>, dist: &na::Vector4<f64>) -> Result<(), Box<dyn Error>> {
     // Load the image in color mode
     let mut gray = Mat::default();
     imgproc::cvt_color(frame, &mut gray, imgproc::COLOR_BGR2GRAY, 0)?;
@@ -67,8 +23,8 @@ pub fn process(frame: &mut Mat, k: &na::Matrix3<f64>, dist: &na::Vector4<f64>) -
         println!("Failed to open the image.");
         return Err(From::from("gray image is empty"));
     }
-    let points = detect::detect_corners(&gray)?; 
-    let world_points = pose::generate_world_points(0.02, (7, 5))?;
+    let points = detect::detect_corners(&gray, pattern)?; 
+    let world_points = pose::generate_world_points(0.02, pattern)?;
 
     for p in points.iter() {
         imgproc::circle(frame, core::Point2i::new(p.x as i32, p.y as i32), 5, core::Scalar::new(255.0, 0.0, 0.0, 255.0), 1, 
@@ -77,7 +33,7 @@ pub fn process(frame: &mut Mat, k: &na::Matrix3<f64>, dist: &na::Vector4<f64>) -
 
 
     let h = 0.5 * pose::compute_h(&points, &world_points)?;
-    let tf = pose::compute_tf(&h, &k)?;
+    let tf = pose::compute_tf(&h, k)?;
     let mut tfs = vec![tf];
     let img_point_set = vec![points];
 
@@ -102,22 +58,7 @@ fn paint(image: &mut Mat, k: &na::Matrix3<f64>, distortion: &na::Vector4<f64>, t
     let project = |k: na::Matrix3<f64>, tf: na::Isometry3<f64>, world_point: na::Point3<f64>|
     -> na::Point2<f64> {
         let transed = tf * world_point;
-        let xn = transed.x / transed.z;
-        let yn = transed.y / transed.z;
-        let fx = k[(0, 0)];
-        let fy = k[(1, 1)];
-        let cx = k[(0, 2)];
-        let cy = k[(1, 2)];
-        let k1 = distortion[0];
-        let k2 = distortion[1];
-        let p1 = distortion[2];
-        let p2 = distortion[3];
-        let rn2 = xn * xn + yn * yn;
-
-        let x = fx * (xn * (1.0 + k1 * rn2 + k2 * rn2 * rn2) + 2.0 * p1 * xn * yn + p2 * (rn2 + 2.0 * xn * xn)) + cx;
-        let y = fy * (yn * (1.0 + k1 * rn2 + k2 * rn2 * rn2) + 2.0 * p2 * xn * yn + p1 * (rn2 + 2.0 * yn * yn)) + cy;
-
-        na::Point2::<f64>::new(x, y)
+        pose::project(&k, distortion, &transed)
     };
 
     let correct_tf = |tf: na::Isometry3<f64>| -> na::Isometry3<f64> {
@@ -149,7 +90,11 @@ fn paint(image: &mut Mat, k: &na::Matrix3<f64>, distortion: &na::Vector4<f64>, t
 }
 
 
-fn generate_model() -> Result<Vec<(na::Point3<f64>, na::Point3<f64>)>, Box<dyn Error>> {
+// Line = (start, end)
+type Line = (na::Point3<f64>, na::Point3<f64>);
+
+// Generate a model of a cube
+fn generate_model() -> Result<Vec<Line>, Box<dyn Error>> {
     let len = 0.1;
     let bottom = vec![
         na::Point3::<f64>::new(0.0, 0.0, 0.0),
@@ -178,33 +123,4 @@ fn generate_model() -> Result<Vec<(na::Point3<f64>, na::Point3<f64>)>, Box<dyn E
     }
 
     Ok(model)
-}
-
-
-#[test]
-fn test_opencv_video() -> Result<(), Box<dyn Error>> {
-    let video_path = "./imgs/test.mp4";
-    let mut capture = videoio::VideoCapture::from_file(video_path, videoio::CAP_ANY)?;
-    
-    if !capture.is_opened()? {
-        panic!("Unable to open video file!");
-    }
-
-    highgui::named_window("Video", highgui::WINDOW_NORMAL)?;
-    let mut frame = Mat::default();
-
-    loop {
-        capture.read(&mut frame)?;
-        
-        if frame.size()?.width <= 0 {
-            break;
-        }
-
-        highgui::imshow("Video", &frame)?;
-        if highgui::wait_key(30)? >= 0 {
-            break;
-        }
-    }
-
-    Ok(())
 }

@@ -1,7 +1,6 @@
 use nalgebra as na;
 use crate::lm;
 
-
 /// Produces a skew-symmetric or "cross-product matrix" from
 /// a 3-vector. This is needed for the `exp_map` and `log_map`
 /// functions
@@ -211,7 +210,7 @@ impl<'a> Calibration<'a> {
 
 impl lm::LMProblem for Calibration<'_> {
     fn residual(&self, param: &na::DVector<f64>) -> na::DVector<f64> {
-                // Get usable camera model and transforms from the parameter vector
+        // Get usable camera model and transforms from the parameter vector
         let transforms = self.tfs;
 
         let num_images = self.image_pts_set.len();
@@ -241,10 +240,8 @@ impl lm::LMProblem for Calibration<'_> {
                 residual_idx += 2;
             }
         }
-
         residual
     }
-
 
     fn jacobian(&self, param: &na::DVector<f64>) -> na::DMatrix<f64> {
         // Get usable camera model and transforms from the parameter vector
@@ -290,6 +287,7 @@ impl lm::LMProblem for Calibration<'_> {
     }
 }
 
+/// Optimize only the scala factor of camera's translation using Levenberg-Marquardt
 pub fn optimize_with_lm(
     k: &na::Matrix3<f64>, 
     dist: &na::Vector4<f64>, 

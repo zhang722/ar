@@ -18,9 +18,18 @@ mod optimize_with_lm;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Model {
-    intrinsic: na::Matrix3<f64>,
-    distortion: na::Vector4<f64>,
+pub struct Model {
+    pub pattern: na::Vector2<i32>,
+    pub intrinsic: na::Matrix3<f64>,
+    pub distortion: na::Vector4<f64>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Config {
+    video_path: String,
+    output_save: bool,
+    output_save_path: String,
+    model: Model,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -30,14 +39,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut content = String::new();
     file.read_to_string(&mut content).expect("Unable to read the file");
 
-    let model: Model = serde_json::from_str(&content)?; 
-    let k = model.intrinsic.transpose();
-    let dist = model.distortion;
-
+    let config: Config = serde_json::from_str(&content)?; 
+    let mut model = config.model;
+    model.intrinsic = model.intrinsic.transpose();
 
     // video
-    let video_path = "./imgs/test.mp4";
-    let mut capture = videoio::VideoCapture::from_file(video_path, videoio::CAP_ANY)?;
+    let video_path = config.video_path;
+    let mut capture = videoio::VideoCapture::from_file(&video_path, videoio::CAP_ANY)?;
     
     if !capture.is_opened()? {
         panic!("Unable to open video file!");
@@ -48,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let fps = capture.get(videoio::CAP_PROP_FPS)?;
 
     let fourcc = videoio::VideoWriter::fourcc('M', 'J', 'P', 'G')?;
-    let output_filename = "output.avi";
+    let output_filename = &config.output_save_path;
     let mut video_writer = videoio::VideoWriter::new(output_filename, fourcc, fps, core::Size2i::new(width as i32, height as i32), true)?;
 
     highgui::named_window("Video", highgui::WINDOW_NORMAL)?;
@@ -61,12 +69,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // process
-        if let Err(e) = gui::process(&mut frame, &k, &dist) {
+        if let Err(e) = gui::process(&mut frame, &model) {
             println!("Error: {}", e);
             continue;
         }
 
-        video_writer.write(&frame)?;
+        if config.output_save {
+            video_writer.write(&frame)?;
+        }
+
         // show
         highgui::imshow("Video", &frame)?;
         if highgui::wait_key(30)? >= 0 {

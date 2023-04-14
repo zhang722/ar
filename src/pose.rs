@@ -5,10 +5,14 @@ use opencv::{
 };
 use nalgebra as na;
 
-fn Normalize(point_vec: &Vec<na::Point2<f64>>) 
--> Result<(Vec<na::Point2<f64>>, na::Matrix3<f64>), Box<dyn Error>>
+
+type NormalizedPoints= Vec<na::Point2<f64>>;
+type NormMatrix = na::Matrix3<f64>;
+/// Normalize the points and return the normalized points and the normalization matrix
+fn normalize(point_vec: &Vec<na::Point2<f64>>) 
+-> Result<(NormalizedPoints, NormMatrix), Box<dyn Error>>
 {
-    let mut norm_T = na::Matrix3::<f64>::identity();
+    let mut norm_t = na::Matrix3::<f64>::identity();
     let mut normed_point_vec = Vec::new();
     let mut mean_x = 0.0;
     let mut mean_y = 0.0;
@@ -35,14 +39,15 @@ fn Normalize(point_vec: &Vec<na::Point2<f64>>)
         p_tmp.y = sy * p.y - mean_y * sy;
         normed_point_vec.push(p_tmp);
     }
-    norm_T[(0, 0)] = sx;
-    norm_T[(0, 2)] = -mean_x * sx;
-    norm_T[(1, 1)] = sy;
-    norm_T[(1, 2)] = -mean_y * sy;
+    norm_t[(0, 0)] = sx;
+    norm_t[(0, 2)] = -mean_x * sx;
+    norm_t[(1, 1)] = sy;
+    norm_t[(1, 2)] = -mean_y * sy;
 
-    Ok((normed_point_vec, norm_T))
+    Ok((normed_point_vec, norm_t))
 }
 
+/// Generate the world points in the chessboard
 pub fn generate_world_points(square_length: f64, pattern: (i32, i32)) -> Result<Vec<na::Point2<f64>>, Box<dyn Error>> {
     let (width, height) = pattern;
     let mut world_points = Vec::new();
@@ -54,6 +59,7 @@ pub fn generate_world_points(square_length: f64, pattern: (i32, i32)) -> Result<
     Ok(world_points)
 }
 
+/// Compute the homography matrix H
 pub fn compute_h(img_points: &Vec<na::Point2<f64>>, world_points: &Vec<na::Point2<f64>>) -> Result<na::Matrix3::<f64>, Box<dyn Error>> {
     let num_points = img_points.len();
     assert_eq!(num_points, world_points.len());
@@ -64,8 +70,8 @@ pub fn compute_h(img_points: &Vec<na::Point2<f64>>, world_points: &Vec<na::Point
     type MatrixXx9<T> = na::Matrix<T, na::Dyn, na::U9, na::VecStorage<T, na::Dyn, na::U9>>;
     type RowVector9<T> = na::Matrix<T, na::U1, na::U9, na::ArrayStorage<T, 1, 9>>;
 
-    let norm_img = Normalize(img_points)?;
-    let norm_world = Normalize(world_points)?;
+    let norm_img = normalize(img_points)?;
+    let norm_world = normalize(world_points)?;
 
     let mut a = MatrixXx9::<f64>::zeros(num_points * 2);
 
@@ -93,12 +99,8 @@ pub fn compute_h(img_points: &Vec<na::Point2<f64>>, world_points: &Vec<na::Point
     };
     let last_row = v_t.row(8);
 
-    // normalize
-    // let last_row = last_row / last_row[8];
-
     // construct matrix from vector
     let mut ret = na::Matrix3::<f64>::from_iterator(last_row.into_iter().cloned()).transpose();
-
 
     ret = match norm_img.1.try_inverse() {
         Some(m) => m,
@@ -108,8 +110,7 @@ pub fn compute_h(img_points: &Vec<na::Point2<f64>>, world_points: &Vec<na::Point
     Ok(ret)  
 }
 
-
-
+/// Compute the transformation matrix T
 pub fn compute_tf(h: &na::Matrix3<f64>, k: &na::Matrix3<f64>) -> Result<na::Isometry3<f64>, Box<dyn Error>>{
     let a = match k.try_inverse() {
         Some(m) => m, 
@@ -125,6 +126,7 @@ pub fn compute_tf(h: &na::Matrix3<f64>, k: &na::Matrix3<f64>) -> Result<na::Isom
     
     let r = r.normalize();
 
+    // get nearest rotation matrix from r since r may not be a rotation matrix
     let svd = r.svd(true, true);
     let r = 
     match svd.u {
@@ -137,7 +139,6 @@ pub fn compute_tf(h: &na::Matrix3<f64>, k: &na::Matrix3<f64>) -> Result<na::Isom
         None => return Err(From::from("compute V failed")),
     }; 
 
-    // let r = na::Rotation3::<f64>::from_matrix_eps(&r, 1.0e-9, 10, na::Rotation3::identity());
     let r = na::Rotation3::<f64>::from_matrix_unchecked(r);
     let t = a.column(2);
     let tf = 
@@ -146,7 +147,7 @@ pub fn compute_tf(h: &na::Matrix3<f64>, k: &na::Matrix3<f64>) -> Result<na::Isom
     Ok(tf)
 }
 
-
+/// Project a scene point $p_s$(scene) to image point $p_p$(pixel)
 pub fn project(
     intrinsic: &na::Matrix3<f64>,  //fx, fy, cx, cy
     distortion: &na::Vector4<f64>, //k1, k2, p1, p2
@@ -169,8 +170,3 @@ pub fn project(
         fy * (yn * (1.0 + k1 * rn2 + k2 * rn2 * rn2) + 2.0 * p2 * xn * yn + p1 * (rn2 + 2.0 * yn * yn)) + cy
     )
 }
-
-
-// pub fn optimize_tf(h: &na::Matrix3<f64>, k: &na::Matrix3<f64>) -> Result<na::Isometry3<f64>, Box<dyn Error>>{
-
-// }
